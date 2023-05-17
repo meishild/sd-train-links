@@ -139,6 +139,8 @@ class TrainProject:
       negative_prompt = "EasyNegative"
       txt2img.create_pipline()
       # ddim,pndm,lms,euler,euler_a,heun,dpm_2,dpm_2_a,dpmsolver,dpmsolver++,dpmsingle,k_lms,k_euler,k_euler_a,k_dpm_2,k_dpm_2_a,
+
+      txt2img.load_vae(os.path.join(project_path, "models", "vae", "animevae.pt"))
       params = Txt2ImgParams(
          sampler="dpmsolver++",
          prompt=prompt,
@@ -148,7 +150,7 @@ class TrainProject:
          height=1024,
          scale=7.5,
          seed=280681258,
-         clip_skip=2
+         clip_skip=2,
       )
       txt2img.txt2img(params)
 

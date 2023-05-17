@@ -2033,13 +2033,11 @@ class Txt2ImgParams():
             scale: float = 7.5,
             clip_skip: int = 1,
             negative_scale: str = None,
-            strength: float = 0.8,
             seed: int = -1,
             n_iter: int = 1,
             batch_size: int = 1,
             clip_prompt: str = None,
             network_muls: Tuple[float] = None,
-            vae: str = None
             ) -> None:
         self.sampler = sampler
         self.prompt = prompt
@@ -2050,13 +2048,11 @@ class Txt2ImgParams():
         self.scale = scale
         self.clip_skip = clip_skip
         self.negative_scale = negative_scale
-        self.strength = strength
         self.seed = seed
         self.n_iter = n_iter
         self.batch_size = batch_size
         self.clip_prompt = clip_prompt
         self.network_muls = network_muls
-        self.vae = vae
 
 class BatchData(NamedTuple):
     return_latents: bool
@@ -3006,6 +3002,12 @@ class GenImages():
 
         return images
 
+    def load_vae(self, vae):
+         # 单独加载vae
+        if vae is not None:
+            self._vae = model_util.load_vae(vae, self._dtype)
+            print("additional VAE loaded")
+
     def txt2img(self, param: Txt2ImgParams):
         if self.v_parameterization and not self.v2:
             print("v_parameterization should be with v2 / v1でv_parameterizationを使用することは想定されていません")
@@ -3015,11 +3017,6 @@ class GenImages():
         # 单独加载simple，当前是在pipline上创建的，需要修改pipline代码。
         # load scheduler 扩散调度器
         self._pipe.set_scheduler(self._get_scheduler(param.sampler))
-
-        # 单独加载vae
-        if param.vae is not None:
-            self._vae = model_util.load_vae(param.vae, self._dtype)
-            print("additional VAE loaded")
 
         # 单独加载embeddings
         self._set_embeddings()
@@ -3061,7 +3058,7 @@ class GenImages():
                         param.steps,
                         param.scale,
                         param.negative_scale,
-                        param.strength,
+                        0,
                         tuple(param.network_muls) if param.network_muls else None,
                         None,
                     ),
