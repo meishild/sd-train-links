@@ -555,6 +555,7 @@ class GenImages():
                 # add new word to tokenizer, count is num_vectors_per_token
                 num_added_tokens = self._tokenizer.add_tokens(token_strings)
                 if num_added_tokens != num_vectors_per_token:
+                    # 会重复加载tokens
                     return
                 # assert (
                 #     num_added_tokens == num_vectors_per_token

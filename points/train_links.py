@@ -46,7 +46,7 @@ class TrainProject:
       self.log_path = os.path.join(self.project_path, "logs")
       self.train_config_path = os.path.join(project_path, "resources", "train_config.json")
 
-   def init_datasets(self):
+   def build_datasets(self):
       self.train_img_path = os.path.join(self.project_path, self.train_name)
       self.tagger_img_path = os.path.join(self.train_img_path, "%d_%s"%(self.train_repeat,  self.train_name))
       if os.path.exists(self.tagger_img_path):
@@ -54,14 +54,14 @@ class TrainProject:
          # shutil.rmtree(tsimg_path)
       else:
          shutil.copytree(self.sources_img_path, self.tagger_img_path)
-   
-   # 1.2 自动打标
-   def do_tagger(self):
       tagger.on_interrogate(self.tagger_img_path, batch_output_dir=self.tagger_img_path)
+
+   def clean_tags(self, tags=[]):
+      pass
+
 
    def do_train(self):
       # 2. 训练
-      global base_model
       args = ArgStore.convert_args_to_dict()
       
       args['base_model'] = self.base_model
@@ -81,32 +81,8 @@ class TrainProject:
       # 2.2 补完json，也要复制一份做存档
       train_network.train(args)
 
-   def test_checkpoints_once(self):
-      gen_image = image_generator.GenImages()
-      gen_image.set_dtype("fp16")
-      gen_image.set_ckpt(os.path.join(project_path, "models" , "ghostmix_v12.safetensors"))
-      gen_image.outdir = os.path.join(self.project_path, "images")
-      gen_image.steps = 28
-      gen_image.height = 768
-      gen_image.width = 512
-      gen_image.sampler = "dpmsolver++"
-      gen_image.clip_skip = 2
-      gen_image.scale = 8
-      gen_image.seed = 280681258
-      gen_image.xformers = True
-      gen_image.max_embeddings_multiples = 3
-      gen_image.textual_inversion_embeddings = [os.path.join(project_path, "models", "embeddings", "EasyNegative.safetensors")]
-      
-      # gen_image.network_module = ["networks.lora"]
-      # gen_image.network_weights = [os.path.join(self.checkpoints_path, "dribbble-design-000001.safetensors")]
-      # gen_image.network_mul = [0.6]
-      gen_image.prompt = "1 girl, cute, solo, beautiful detailed sky, city ,detailed cafe, night, sitting, dating, (smile:1.1),(closed mouth) medium breasts,beautiful detailed eyes,(collared shirt:1.1),pleated skirt,(long hair:1.2),floating hair --n EasyNegative"
-      gen_image.gen_once_image()
-      
-   def test_checkpoints_n(self):
+   def gen_checkpoint_images(self):
       seed = random.randint(0, 0x7FFFFFFF)
-      self.checkpoints_path = "E:\\ai-stable-diffsuion\\LoRA\\lora-train\\outputs\\ghiblistyle\\\dylora"
-
       check_points = [name for name in os.listdir(self.checkpoints_path)if name.endswith('.safetensors')]
 
       gen_image = image_generator.GenImages()
@@ -122,7 +98,7 @@ class TrainProject:
       gen_image.xformers = True
       gen_image.max_embeddings_multiples = 3
       gen_image.img_name_type = "network"
-      
+
       gen_image.create_pipline()
       for check_point in check_points:               
          gen_image.network_module = ["networks.lora"]
@@ -134,11 +110,25 @@ class TrainProject:
          gen_image.prompt = "masterpiece, best quality, 1girl, food, short hair, solo, indoors, suspenders, shirt, rice, holding, open mouth, short sleeves, yellow shirt, sitting, smile, black hair, barefoot, apron, chopsticks, black eyes, tatami, collared shirt, seiza, child, bowl" + " --n EasyNegative"
          gen_image.gen_batch_process()
 
+
 if __name__ == '__main__':
    train_name = "dribbble-design"
    train_repeat = 8
 
    design_project = TrainProject("dribbble-design", 8)
    
+   # 初始化项目
    design_project.init_project()
-   design_project.test_cmd_checkpoints_once()
+
+   # 构建数据集
+   design_project.build_datasets()
+
+   # 清理标签
+   tags = []
+   design_project.clean_tags(tags)
+
+   # 开始训练
+   design_project.do_train()
+
+   # 生成实例图片
+   design_project.gen_checkpoint_images()

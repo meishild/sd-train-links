@@ -120,26 +120,37 @@ class TrainProject:
       subprocess.check_call(cmd.split(" "))
 
    def test_checkpoints_once(self):
-      gen_image = image_generator.GenImages()
-      gen_image.set_dtype("fp16")
-      gen_image.set_ckpt(os.path.join(project_path, "models" , "ghostmix_v12.safetensors"))
-      gen_image.outdir = os.path.join(self.project_path, "images")
-      gen_image.steps = 28
-      gen_image.height = 768
-      gen_image.width = 512
-      gen_image.sampler = "dpmsolver++"
-      gen_image.clip_skip = 2
-      gen_image.scale = 8
-      gen_image.seed = 280681258
-      gen_image.xformers = True
-      gen_image.max_embeddings_multiples = 3
-      gen_image.textual_inversion_embeddings = [os.path.join(project_path, "models", "embeddings", "EasyNegative.safetensors")]
+      from diffusion_generator.image_generator_simple import GenImages
+      from diffusion_generator.image_generator_simple import Txt2ImgParams
+
+      txt2img= GenImages()
+      txt2img.set_dtype("fp16")
+      txt2img.set_ckpt(os.path.join(project_path, "models" , "ghostmix_v12.safetensors"))
+      txt2img.outdir = os.path.join(self.project_path, "images")
+
+      txt2img.xformers = True
+      txt2img.max_embeddings_multiples = 3
+      txt2img.textual_inversion_embeddings = [os.path.join(project_path, "models", "embeddings", "EasyNegative.safetensors")]
       
       # gen_image.network_module = ["networks.lora"]
       # gen_image.network_weights = [os.path.join(self.checkpoints_path, "dribbble-design-000001.safetensors")]
       # gen_image.network_mul = [0.6]
-      gen_image.prompt = "1 girl, cute, solo, beautiful detailed sky, city ,detailed cafe, night, sitting, dating, (smile:1.1),(closed mouth) medium breasts,beautiful detailed eyes,(collared shirt:1.1),pleated skirt,(long hair:1.2),floating hair --n EasyNegative"
-      gen_image.gen_once_image()
+      prompt = "1 girl, cute, solo, beautiful detailed sky, city ,detailed cafe, night, sitting, dating, (smile:1.1),(closed mouth) medium breasts,beautiful detailed eyes,(collared shirt:1.1),pleated skirt,(long hair:1.2),floating hair"
+      negative_prompt = "EasyNegative"
+      txt2img.create_pipline()
+      # ddim,pndm,lms,euler,euler_a,heun,dpm_2,dpm_2_a,dpmsolver,dpmsolver++,dpmsingle,k_lms,k_euler,k_euler_a,k_dpm_2,k_dpm_2_a,
+      params = Txt2ImgParams(
+         sampler="dpmsolver++",
+         prompt=prompt,
+         negative_prompt=negative_prompt,
+         steps=30,
+         width=768,
+         height=1024,
+         scale=7.5,
+         seed=280681258,
+         clip_skip=2
+      )
+      txt2img.txt2img(params)
 
    def test_checkpoints_n(self):
       seed = random.randint(0, 0x7FFFFFFF)
@@ -180,4 +191,4 @@ if __name__ == '__main__':
    design_project = TrainProject("dribbble-design", 8)
    
    design_project.init_project()
-   design_project.test_checkpoints_n()
+   design_project.test_checkpoints_once()
