@@ -2022,6 +2022,24 @@ class BatchDataExt(NamedTuple):
     network_muls: Tuple[float]
     num_sub_prompts: int
 
+class NetWorkData():
+    def __init__(self,
+                 network_module: str, 
+                 network_weight: str, 
+                 network_mul: float
+                 ) -> None:
+        
+        self.network_module = network_module
+        self.network_weight = network_weight
+        self.network_mul = network_mul
+        
+        # additional argmuments for network (key=value)
+        self.network_args = None
+        # show metadata of network model
+        self.network_show_meta = False
+        # "merge network weights to original model
+        self.network_merge = False
+
 class Txt2ImgParams():
     def __init__(self,
             sampler: str = "ddim",
@@ -2036,8 +2054,7 @@ class Txt2ImgParams():
             seed: int = -1,
             n_iter: int = 1,
             batch_size: int = 1,
-            clip_prompt: str = None,
-            network_muls: Tuple[float] = None,
+            clip_prompt: str = None
             ) -> None:
         self.sampler = sampler
         self.prompt = prompt
@@ -2052,7 +2069,8 @@ class Txt2ImgParams():
         self.n_iter = n_iter
         self.batch_size = batch_size
         self.clip_prompt = clip_prompt
-        self.network_muls = network_muls
+        
+        self.networks:tuple[NetWorkData] = []
 
 class BatchData(NamedTuple):
     return_latents: bool
@@ -2167,19 +2185,6 @@ class GenImages():
         
         # set channels last option to model
         self.opt_channels_last = False
-
-        # additional network module to use, lora
-        self.network_module = []
-        # additional network weights to load
-        self.network_weights = []
-        # additional network multiplier
-        self.network_mul = []
-        # additional argmuments for network (key=value)
-        self.network_args = None
-        # show metadata of network model
-        self.network_show_meta = False
-        # "merge network weights to original model
-        self.network_merge = False
 
         # Embeddings files of Extended Textual Inversion / Extended Textual Inversionのembeddings
         self.XTI_embeddings = None
@@ -2502,51 +2507,51 @@ class GenImages():
         if self.diffusers_xformers:
             self._pipe.enable_xformers_memory_efficient_attention()
 
-    def load_network(self, append_network=True):
+    def load_network(self, networks:tuple[NetWorkData], append_network=True):
         # networkを組み込む
         network_list = []
-        if len(self.network_module) > 0:
-            for i, network_module in enumerate(self.network_module):
-                print("import network module:", network_module)
-                imported_module = importlib.import_module(network_module)
 
-                network_mul = 1.0 if self.network_mul is None or len(self.network_mul) <= i else self.network_mul[i]
-                self._network_default_muls.append(network_mul)
+        if len(networks) > 0:
+            for n in networks:
+                print("import network module:", n.network_module)
+                imported_module = importlib.import_module(n.network_module)
+
+                self._network_default_muls.append(n.network_mul)
 
                 net_kwargs = {}
-                if self.network_args and i < len(self.network_args):
-                    network_args = self.network_args[i]
+                if n.network_args:
                     # TODO escape special chars
-                    network_args = network_args.split(";")
+                    network_args = n.network_args.split(";")
                     for net_arg in network_args:
                         key, value = net_arg.split("=")
                         net_kwargs[key] = value
 
-                if self.network_weights and i < len(self.network_weights):
-                    network_weight = self.network_weights[i]
-                    print("load network weights from:", network_weight)
-
-                    if model_util.is_safetensors(network_weight) and self.network_show_meta:
-                        from safetensors.torch import safe_open
-
-                        with safe_open(network_weight, framework="pt") as f:
-                            metadata = f.metadata()
-                        if metadata is not None:
-                            print(f"metadata for: {network_weight}: {metadata}")
-                    network_list.append("%s_%.2f" % (os.path.basename(self.network_weights[0]).split(".")[0], network_mul))
-                    network, weights_sd = imported_module.create_network_from_weights(
-                        network_mul, network_weight, self._vae, self._text_encoder, self._unet, for_inference=True, **net_kwargs
-                    )
-                else:
+                if not n.network_weight:
                     raise ValueError("No weight. Weight is required.")
+
+                print("load network weights from:", n.network_weight)
+
+                if model_util.is_safetensors(n.network_weight) and n.network_show_meta:
+                    from safetensors.torch import safe_open
+
+                    with safe_open(n.network_weight, framework="pt") as f:
+                        metadata = f.metadata()
+                    if metadata is not None:
+                        print(f"metadata for: {n.network_weight}: {metadata}")
+
+                network_list.append("%s_%.2f" % (os.path.basename(n.network_weight).split(".")[0], n.network_mul))
+                network, weights_sd = imported_module.create_network_from_weights(
+                    n.network_mul, n.network_weight, self._vae, self._text_encoder, self._unet, for_inference=True, **net_kwargs
+                )
+                    
                 if network is None:
                     return
 
                 mergiable = hasattr(network, "merge_to")
-                if self.network_merge and not mergiable:
+                if n.network_merge and not mergiable:
                     print("network is not mergiable. ignore merge option.")
 
-                if not self.network_merge or not mergiable:
+                if not n.network_merge or not mergiable:
                     network.apply_to(self._text_encoder, self._unet)
                     info = network.load_state_dict(weights_sd, False)  # network.load_weightsを使うようにするとよい
                     print(f"weights are loaded: {info}")
@@ -3014,6 +3019,9 @@ class GenImages():
         if self.v2 and param.clip_skip > 1:
             print("v2 with clip_skip will be unexpected / v2でclip_skipを使用することは想定されていません")
 
+        if param.networks:
+            self.load_network(param.networks,append_network=False)
+
         # 单独加载simple，当前是在pipline上创建的，需要修改pipline代码。
         # load scheduler 扩散调度器
         self._pipe.set_scheduler(self._get_scheduler(param.sampler))
@@ -3059,7 +3067,7 @@ class GenImages():
                         param.scale,
                         param.negative_scale,
                         0,
-                        tuple(param.network_muls) if param.network_muls else None,
+                        None,
                         None,
                     ),
                 )

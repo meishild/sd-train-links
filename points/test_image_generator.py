@@ -120,8 +120,7 @@ class TrainProject:
       subprocess.check_call(cmd.split(" "))
 
    def test_checkpoints_once(self):
-      from diffusion_generator.image_generator_simple import GenImages
-      from diffusion_generator.image_generator_simple import Txt2ImgParams
+      from diffusion_generator.image_generator_simple import GenImages, Txt2ImgParams, NetWorkData
 
       txt2img= GenImages()
       txt2img.set_dtype("fp16")
@@ -131,10 +130,7 @@ class TrainProject:
       txt2img.xformers = True
       txt2img.max_embeddings_multiples = 3
       txt2img.textual_inversion_embeddings = [os.path.join(project_path, "models", "embeddings", "EasyNegative.safetensors")]
-      
-      # gen_image.network_module = ["networks.lora"]
-      # gen_image.network_weights = [os.path.join(self.checkpoints_path, "dribbble-design-000001.safetensors")]
-      # gen_image.network_mul = [0.6]
+
       prompt = "1 girl, cute, solo, beautiful detailed sky, city ,detailed cafe, night, sitting, dating, (smile:1.1),(closed mouth) medium breasts,beautiful detailed eyes,(collared shirt:1.1),pleated skirt,(long hair:1.2),floating hair"
       negative_prompt = "EasyNegative"
       txt2img.create_pipline()
@@ -152,38 +148,59 @@ class TrainProject:
          seed=280681258,
          clip_skip=2,
       )
+      
+      network = NetWorkData(
+            network_module="networks.lora",
+            network_weight=os.path.join(project_path, "models", "lora", "JiaranDianaLoraASOUL_v20SingleCostume.safetensors"), 
+            network_mul=0.8
+      )
+      # params.networks=[network]
       txt2img.txt2img(params)
 
    def test_checkpoints_n(self):
-      seed = random.randint(0, 0x7FFFFFFF)
-      self.checkpoints_path = "E:\\ai-stable-diffsuion\\LoRA\\lora-train\\outputs\\ghiblistyle\\\dylora"
+      from diffusion_generator.image_generator_simple import GenImages, Txt2ImgParams, NetWorkData
 
+      txt2img= GenImages()
+      txt2img.set_dtype("fp16")
+      txt2img.set_ckpt(os.path.join(project_path, "models" , "ghostmix_v12.safetensors"))
+      txt2img.outdir = os.path.join(self.project_path, "images")
+
+      txt2img.xformers = True
+      txt2img.max_embeddings_multiples = 3
+      txt2img.textual_inversion_embeddings = [os.path.join(project_path, "models", "embeddings", "EasyNegative.safetensors")]
+
+      prompt = "1 girl, cute, solo, beautiful detailed sky, city ,detailed cafe, night, sitting, dating, (smile:1.1),(closed mouth) medium breasts,beautiful detailed eyes,(collared shirt:1.1),pleated skirt,(long hair:1.2),floating hair"
+      negative_prompt = "EasyNegative"
+      txt2img.create_pipline()
+
+      self.checkpoints_path = "E:\\ai-stable-diffsuion\\LoRA\\lora-train\\outputs\\ghiblistyle\\\dylora"
       check_points = [name for name in os.listdir(self.checkpoints_path)if name.endswith('.safetensors')]
 
-      gen_image = image_generator.GenImages()
-      gen_image.set_dtype("fp16")
-      gen_image.set_ckpt(os.path.join(project_path, "models" , "NAI-full.ckpt"))
-      gen_image.outdir = os.path.join(self.project_path, "images")
-      gen_image.steps = 30
-      gen_image.sampler = "dpmsolver++"
-      gen_image.clip_skip = 2
-      gen_image.width = 512
-      gen_image.height = 768
-      gen_image.seed = seed
-      gen_image.xformers = True
-      gen_image.max_embeddings_multiples = 3
-      gen_image.img_name_type = "network"
-      
-      gen_image.create_pipline()
-      for check_point in check_points:               
-         gen_image.network_module = ["networks.lora"]
-         gen_image.network_weights = [os.path.join(self.checkpoints_path, check_point)]
-         gen_image.network_mul = [1]
-         gen_image.textual_inversion_embeddings = [os.path.join(project_path, "models", "embeddings", "EasyNegative.safetensors")]
-         gen_image.load_network(append_network=False)
-
-         gen_image.prompt = "masterpiece, best quality, 1girl, food, short hair, solo, indoors, suspenders, shirt, rice, holding, open mouth, short sleeves, yellow shirt, sitting, smile, black hair, barefoot, apron, chopsticks, black eyes, tatami, collared shirt, seiza, child, bowl" + " --n EasyNegative"
-         gen_image.gen_batch_process()
+      seed = random.randint(0, 0x7FFFFFFF)
+      for check_point in check_points:  
+         params = Txt2ImgParams(
+            sampler="dpmsolver++",
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            steps=30,
+            width=768,
+            height=1024,
+            scale=7.5,
+            seed=seed,
+            clip_skip=2,
+         )
+         network = NetWorkData(
+            network_module="networks.lora",
+            network_weight=os.path.join(self.checkpoints_path, check_point), 
+            network_mul=0.6
+         )
+         network2 = NetWorkData(
+            network_module="networks.lora",
+            network_weight=os.path.join(project_path, "models", "lora", "JiaranDianaLoraASOUL_v20SingleCostume.safetensors"), 
+            network_mul=0.8
+         )
+         params.networks=[network, network2]
+         txt2img.txt2img(params)
 
 
 if __name__ == '__main__':
@@ -193,4 +210,4 @@ if __name__ == '__main__':
    design_project = TrainProject("dribbble-design", 8)
    
    design_project.init_project()
-   design_project.test_checkpoints_once()
+   design_project.test_checkpoints_n()
