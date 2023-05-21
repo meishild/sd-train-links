@@ -117,7 +117,6 @@ class TrainProject:
       python = r"python310\python.exe"
       cmd = f"{python} points/sd_scripts/gen_img_diffusers.py %s" % " ".join(args)
       print(cmd)
-      subprocess.check_call(cmd.split(" "))
 
    def test_checkpoints_once(self):
       from diffusion_generator.image_generator_simple import GenImages, Txt2ImgParams, NetWorkData
@@ -154,7 +153,8 @@ class TrainProject:
             network_weight=os.path.join(project_path, "models", "lora", "JiaranDianaLoraASOUL_v20SingleCostume.safetensors"), 
             network_mul=0.8
       )
-      # params.networks=[network]
+
+      params.networks=[network]
       txt2img.txt2img(params)
 
    def test_checkpoints_n(self):
@@ -177,7 +177,7 @@ class TrainProject:
       check_points = [name for name in os.listdir(self.checkpoints_path)if name.endswith('.safetensors')]
 
       seed = random.randint(0, 0x7FFFFFFF)
-      for check_point in check_points:  
+      for check_point in check_points:
          params = Txt2ImgParams(
             sampler="dpmsolver++",
             prompt=prompt,
@@ -210,4 +210,4 @@ if __name__ == '__main__':
    design_project = TrainProject("dribbble-design", 8)
    
    design_project.init_project()
-   design_project.test_checkpoints_n()
+   design_project.test_checkpoints_once()

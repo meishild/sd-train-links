@@ -2191,19 +2191,6 @@ class GenImages():
         # Embeddings files of Textual Inversion / Textual Inversionのembeddings
         self.textual_inversion_embeddings = None
 
-        # enable highres fix, reso scale for 1st stage
-        self.highres_fix_scale = 0.0
-        # 1st stage steps for highres fix
-        self.highres_fix_steps = 28
-        # upscaler module for highres fix 
-        self.highres_fix_upscaler = None
-        # additional argmuments for upscaler (key=value)
-        self.highres_fix_upscaler_args = None
-        # save 1st stage images for highres fix
-        self.highres_fix_save_1st = None
-        # use latents upscaling for highres fix
-        self.highres_fix_latents_upscaling = None
-
         # set another guidance scale for negative prompt
         self.negative_scale = None
 
@@ -2432,22 +2419,6 @@ class GenImages():
             scheduler.config.clip_sample = True
         return scheduler
 
-    def _set_highres(self):
-         # upscalerの指定があれば取得する
-        if self.highres_fix_upscaler:
-            print("import upscaler module:", self.highres_fix_upscaler)
-            imported_module = importlib.import_module(self.highres_fix_upscaler)
-
-            us_kwargs = {}
-            if self.highres_fix_upscaler_args:
-                for net_arg in self.highres_fix_upscaler_args.split(";"):
-                    key, value = net_arg.split("=")
-                    us_kwargs[key] = value
-
-            print("create upscaler")
-            self._upscaler = imported_module.create_upscaler(**us_kwargs)
-            self._upscaler.to(self._dtype).to(self._device)
-
     def _set_control_net(self):
         if self.control_net_models:
             for i, model in enumerate(self.control_net_models):
@@ -2460,9 +2431,6 @@ class GenImages():
                 self._control_nets.append(ControlNetInfo(ctrl_unet, ctrl_net, prep, weight, ratio))
     
     def create_pipline(self):
-        # V2配置检查
-        assert not self.highres_fix_scale or self.image_path is None, f"highres_fix doesn't work with img2img / highres_fixはimg2imgと同時に使えません"
-
         # xformers、Hypernetwork 一致
         if not self.diffusers_xformers:
             replace_unet_modules(self._unet, not self.xformers, self.xformers)
@@ -2481,9 +2449,6 @@ class GenImages():
             self._clip_model.to(self._dtype).to(self._device)
         if self.vgg16_model is not None:
             self.vgg16_model.to(self._dtype).to(self._device)
-        
-        # set highres
-        self._set_highres()
         
         # set ControlNet
         self._set_control_net()
@@ -2781,76 +2746,9 @@ class GenImages():
     #     self._mask_images = mask_images
     #     self._guide_images = guide_images
 
-    def _process_batch(self, batch: List[BatchData], highres_fix, highres_1st=False):
+    def _process_batch(self, batch: List[BatchData]):
         batch_size = len(batch)
         max_embeddings_multiples = 1 if self.max_embeddings_multiples is None else self.max_embeddings_multiples
-        
-        # highres_fixの処理
-        if highres_fix and not highres_1st:
-            # 1st stageのバッチを作成して呼び出す：サイズを小さくして呼び出す
-            is_1st_latent = self._upscaler.support_latents() if self._upscaler else self.highres_fix_latents_upscaling
-
-            print("process 1st stage")
-            batch_1st = []
-            for _, base, ext in batch:
-                width_1st = int(ext.width * self.highres_fix_scale + 0.5)
-                height_1st = int(ext.height * self.highres_fix_scale + 0.5)
-                width_1st = width_1st - width_1st % 32
-                height_1st = height_1st - height_1st % 32
-
-                ext_1st = BatchDataExt(
-                    width_1st,
-                    height_1st,
-                    self.highres_fix_steps,
-                    ext.scale,
-                    ext.negative_scale,
-                    ext.strength,
-                    ext.network_muls,
-                    ext.num_sub_prompts,
-                )
-                batch_1st.append(BatchData(is_1st_latent, base, ext_1st))
-            images_1st = self._process_batch(batch_1st, True, True)
-
-            # 2nd stageのバッチを作成して以下処理する
-            print("process 2nd stage")
-            width_2nd, height_2nd = batch[0].ext.width, batch[0].ext.height
-
-            if self._upscaler:
-                # upscalerを使って画像を拡大する
-                lowreso_imgs = None if is_1st_latent else images_1st
-                lowreso_latents = None if not is_1st_latent else images_1st
-
-                # 戻り値はPIL.Image.Imageかtorch.Tensorのlatents
-                batch_size = len(images_1st)
-                vae_batch_size = (
-                    batch_size
-                    if self.vae_batch_size is None
-                    else (max(1, int(batch_size * self.vae_batch_size)) if self.vae_batch_size < 1 else self.vae_batch_size)
-                )
-                vae_batch_size = int(vae_batch_size)
-                images_1st = self._upscaler.upscale(
-                    self._vae, lowreso_imgs, lowreso_latents, self._dtype, width_2nd, height_2nd, batch_size, vae_batch_size
-                )
-
-            elif self.highres_fix_latents_upscaling:
-                # latentを拡大する
-                org_dtype = images_1st.dtype
-                if images_1st.dtype == torch.bfloat16:
-                    images_1st = images_1st.to(torch.float)  # interpolateがbf16をサポートしていない
-                images_1st = torch.nn.functional.interpolate(
-                    images_1st, (batch[0].ext.height // 8, batch[0].ext.width // 8), mode="bilinear"
-                )  # , antialias=True)
-                images_1st = images_1st.to(org_dtype)
-
-            else:
-                # 画像をLANCZOSで拡大する
-                images_1st = [image.resize((width_2nd, height_2nd), resample=PIL.Image.LANCZOS) for image in images_1st]
-
-            batch_2nd = []
-            for i, (bd, image) in enumerate(zip(batch, images_1st)):
-                bd_2nd = BatchData(False, BatchDataBase(*bd.base[0:3], bd.base.clip_skip, bd.base.seed + 1, image, None, *bd.base[6:]), bd.ext)
-                batch_2nd.append(bd_2nd)
-            batch = batch_2nd
 
         # このバッチの情報を取り出す
         (
@@ -2975,12 +2873,8 @@ class GenImages():
             clip_prompts=clip_prompts,
             clip_guide_images=guide_images,
         )[0]
-        
-        if highres_1st and not self.highres_fix_save_1st:  # return images or latents
-            return images
 
         # save image
-        highres_prefix = ("0" if highres_1st else "1") if highres_fix else ""
         ts_str = time.strftime("%Y%m%d%H%M%S", time.localtime())
         for i, (image, prompt, negative_prompts, seed, clip_prompt) in enumerate(
             zip(images, prompts, negative_prompts, seeds, clip_prompts)
@@ -2994,14 +2888,14 @@ class GenImages():
                     fln =  f"{self.img_name_prefix}-{fln}"
             elif self.sequential_file_name:
                 if self.img_name_prefix:
-                    fln = f"{self.img_name_prefix}-{highres_prefix}{step_first + i + 1:06d}.png"
+                    fln = f"{self.img_name_prefix}-{step_first + i + 1:06d}.png"
                 else:
-                    fln = f"im_{highres_prefix}{step_first + i + 1:06d}.png"
+                    fln = f"im_{step_first + i + 1:06d}.png"
             else:
                 if self.img_name_prefix:
-                    fln = f"{self.img_name_prefix}-{highres_prefix}{i:03d}.png"
+                    fln = f"{self.img_name_prefix}-{i:03d}.png"
                 else:
-                    fln = f"im_{ts_str}_{highres_prefix}{i:03d}_{seed}.png"
+                    fln = f"im_{ts_str}_{i:03d}_{seed}.png"
             
             image.save(os.path.join(self.outdir, fln))
 
@@ -3020,7 +2914,7 @@ class GenImages():
             print("v2 with clip_skip will be unexpected / v2でclip_skipを使用することは想定されていません")
 
         if param.networks:
-            self.load_network(param.networks,append_network=False)
+            self.load_network(param.networks, append_network=False)
 
         # 单独加载simple，当前是在pipline上创建的，需要修改pipline代码。
         # load scheduler 扩散调度器
@@ -3072,18 +2966,18 @@ class GenImages():
                     ),
                 )
                 if len(batch_data) > 0 and batch_data[-1].ext != b1.ext:  # バッチ分割必要？
-                    self._process_batch(batch_data, self.highres_fix_scale)
+                    self._process_batch(batch_data)
                     batch_data.clear()
 
                 batch_data.append(b1)
                 if len(batch_data) == param.batch_size:
-                    self._process_batch(batch_data, self.highres_fix_scale)[0]
+                    self._process_batch(batch_data)[0]
                     batch_data.clear()
 
                 global_step += 1
 
             if len(batch_data) > 0:
-                self._process_batch(batch_data, self.highres_fix_scale)
+                self._process_batch(batch_data)
                 batch_data.clear()
 
         print("done!")
