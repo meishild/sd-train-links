@@ -78,11 +78,6 @@ VGG16_INPUT_RESIZE_DIV = 4
 NUM_CUTOUTS = 4
 USE_CUTOUTS = False
 
-# region モジュール入れ替え部
-"""
-高速化のためのモジュール入れ替え
-"""
-
 # FlashAttentionを使うCrossAttention
 # based on https://github.com/lucidrains/memory-efficient-attention-pytorch/blob/main/memory_efficient_attention_pytorch/flash_attention.py
 # LICENSE MIT https://github.com/lucidrains/memory-efficient-attention-pytorch/blob/main/LICENSE
@@ -347,14 +342,6 @@ def replace_unet_cross_attn_to_xformers():
         return out
 
     diffusers.models.attention.CrossAttention.forward = forward_xformers
-
-
-# endregion
-
-# region 画像生成の本体：lpw_stable_diffusion.py （ASL）からコピーして修正
-# https://github.com/huggingface/diffusers/blob/main/examples/community/lpw_stable_diffusion.py
-# Pipelineだけ独立して使えないのと機能追加するのとでコピーして修正
-
 
 class PipelineLike:
     r"""
@@ -1989,15 +1976,6 @@ def preprocess_mask(mask):
     return mask
 
 
-# endregion
-
-
-# def load_clip_l14_336(dtype):
-#   print(f"loading CLIP: {CLIP_ID_L14_336}")
-#   text_encoder = CLIPTextModel.from_pretrained(CLIP_ID_L14_336, torch_dtype=dtype)
-#   return text_encoder
-
-
 class BatchDataBase(NamedTuple):
     # 基础数据
     step: int
@@ -2052,7 +2030,6 @@ class Txt2ImgParams():
             clip_skip: int = 1,
             negative_scale: str = None,
             seed: int = -1,
-            n_iter: int = 1,
             batch_size: int = 1,
             clip_prompt: str = None
             ) -> None:
@@ -2066,7 +2043,6 @@ class Txt2ImgParams():
         self.clip_skip = clip_skip
         self.negative_scale = negative_scale
         self.seed = seed
-        self.n_iter = n_iter
         self.batch_size = batch_size
         self.clip_prompt = clip_prompt
         
@@ -2156,17 +2132,11 @@ class GenImages():
         self.mask_path = None
         # img2img strength
         self.strength = None
-        # number of images per prompt ？ 用途
-        self.images_per_prompt = 1
 
         self.outdir = None
-        # sequential output file name
-        self.use_original_file_name = False
-        # prepend original file name in img2img
-        self.sequential_file_name = False
 
         # use fp16 / bfloat16 / float32
-        self._dtype = torch.float32
+        self._dtype = torch.float16
         # path to checkpoint of model
         self._ckpt = None
         # path to checkpoint of vae to replace
@@ -2223,7 +2193,6 @@ class GenImages():
         # batch size for VAE, < 1.0 for ratio
         self.vae_batch_size = 0
 
-        # 
         self._networks = []
         self._text_encoder = None
         
@@ -2247,13 +2216,11 @@ class GenImages():
         self.img_name_prefix = None # "network"
         self.img_name_type = "default"
 
-    def set_dtype(self, dtype:str=["fp16" ,"bp16", "fp32"]):
-        if dtype == "fp16":
-            self._dtype = torch.float16
-        elif dtype == "bp16":
+    def set_dtype(self, dtype:str=["fp16" ,"bp16"]):
+        if dtype == "bp16":
             self._dtype = torch.bfloat16
         else:
-            self._dtype = torch.float32
+            self._dtype = torch.float16
 
     def set_ckpt(self, ckpt_path:str):
         self._ckpt = ckpt_path
@@ -2876,27 +2843,8 @@ class GenImages():
 
         # save image
         ts_str = time.strftime("%Y%m%d%H%M%S", time.localtime())
-        for i, (image, prompt, negative_prompts, seed, clip_prompt) in enumerate(
-            zip(images, prompts, negative_prompts, seeds, clip_prompts)
-        ):
-            if self.use_original_file_name and init_images is not None:
-                if type(init_images) is list:
-                    fln = os.path.splitext(os.path.basename(init_images[i % len(init_images)].filename))[0] + ".png"
-                else:
-                    fln = os.path.splitext(os.path.basename(init_images.filename))[0] + ".png"
-                if self.img_name_prefix:
-                    fln =  f"{self.img_name_prefix}-{fln}"
-            elif self.sequential_file_name:
-                if self.img_name_prefix:
-                    fln = f"{self.img_name_prefix}-{step_first + i + 1:06d}.png"
-                else:
-                    fln = f"im_{step_first + i + 1:06d}.png"
-            else:
-                if self.img_name_prefix:
-                    fln = f"{self.img_name_prefix}-{i:03d}.png"
-                else:
-                    fln = f"im_{ts_str}_{i:03d}_{seed}.png"
-            
+        for i, (image, seed) in enumerate(zip(images, seeds)):
+            fln = f"im_{ts_str}_{i:03d}_{seed}.png"
             image.save(os.path.join(self.outdir, fln))
 
         return images
@@ -2923,80 +2871,41 @@ class GenImages():
         # 单独加载embeddings
         self._set_embeddings()
 
-        # 指定seed，根据批次指定随机seed队列
-        # n_iter 是指生成几批？images_per_prompt又是什么
-        if param.seed != -1:
-            random.seed(param.seed)
-            predefined_seeds = [random.randint(0, 0x7FFFFFFF) for _ in range(param.n_iter * self.images_per_prompt)]
-            if len(predefined_seeds) == 1:
-                predefined_seeds[0] = param.seed
-        else:
-            predefined_seeds = None
-
         # 初始化目录
         os.makedirs(self.outdir, exist_ok=True)
 
-        seeds = None
-        for gen_iter in range(param.n_iter):
-            print(f"iteration {gen_iter+1}/{param.n_iter}")
-            iter_seed = random.randint(0, 0x7FFFFFFF)
+        print(f"prompt: {param.prompt}")
+        print(f"negative_prompt: {param.negative_prompt}")
+        
+        first_seed = param.seed
+        if first_seed is None or first_seed == -1:
+            first_seed = random.randint(0, 0x7FFFFFFF)
 
-            # 画像生成のプロンプトが一周するまでのループ
-            global_step = 0
-            batch_data = []
-  
-            print(f"prompt: {param.prompt}")
-            print(f"negative_prompt: {param.negative_prompt}")
+        seeds = [first_seed + i for i in range(param.batch_size)]
+        global_step = 0
+        batch_data = []
+        for seed in seeds:  # images_per_prompt数量
+            b1 = BatchData(
+                False,
+                BatchDataBase(global_step, param.prompt, param.negative_prompt, seed, param.clip_skip, None, None, param.clip_prompt, None),
+                BatchDataExt(
+                    param.width,
+                    param.height,
+                    param.steps,
+                    param.scale,
+                    param.negative_scale,
+                    0,
+                    None,
+                    None,
+                ),
+            )
+            batch_data.append(b1)
+            global_step += 1
 
-            seeds = self._gen_seeds(predefined_seeds, iter_seed, seeds)
-
-            for seed in seeds:  # images_per_prompt数量
-                b1 = BatchData(
-                    False,
-                    BatchDataBase(global_step, param.prompt, param.negative_prompt, seed, param.clip_skip, None, None, param.clip_prompt, None),
-                    BatchDataExt(
-                        param.width,
-                        param.height,
-                        param.steps,
-                        param.scale,
-                        param.negative_scale,
-                        0,
-                        None,
-                        None,
-                    ),
-                )
-                if len(batch_data) > 0 and batch_data[-1].ext != b1.ext:  # バッチ分割必要？
-                    self._process_batch(batch_data)
-                    batch_data.clear()
-
-                batch_data.append(b1)
-                if len(batch_data) == param.batch_size:
-                    self._process_batch(batch_data)[0]
-                    batch_data.clear()
-
-                global_step += 1
-
-            if len(batch_data) > 0:
-                self._process_batch(batch_data)
-                batch_data.clear()
+        self._process_batch(batch_data)
+        batch_data.clear()
 
         print("done!")
-
-    def _gen_seeds(self, predefined_seeds, iter_seed, seeds):
-        if seeds is not None:
-                    # 数が足りないなら繰り返す
-            if len(seeds) < self.images_per_prompt:
-                seeds = seeds * int(math.ceil(self.images_per_prompt / len(seeds)))
-            seeds = seeds[: self.images_per_prompt]
-        else:
-            if predefined_seeds is not None:
-                seeds = predefined_seeds[-self.images_per_prompt :]
-                predefined_seeds = predefined_seeds[: -self.images_per_prompt]
-            elif self.iter_same_seed:
-                seeds = [iter_seed] * self.images_per_prompt
-            else:
-                seeds = [random.randint(0, 0x7FFFFFFF) for _ in range(self.images_per_prompt)]
-        return seeds
     
     def gen_once_image(self):
         self.create_pipline()
@@ -3004,4 +2913,3 @@ class GenImages():
         self.load_network()
 
         self.gen_batch_process()
-
