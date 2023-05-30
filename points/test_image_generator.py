@@ -119,7 +119,7 @@ class TrainProject:
       print(cmd)
 
    def test_checkpoints_once(self):
-      from diffusion_generator.txt2img import GenImages, Txt2ImgParams, NetWorkData
+      from diffusion_generator.image_generator_simple import GenImages, Txt2ImgParams, NetWorkData
 
       txt2img= GenImages()
       txt2img.set_dtype("fp16")
