@@ -554,6 +554,7 @@ class GenImages():
                     self._networks=[network]
             else:
                 network.merge_to(self._text_encoder, self._unet, weights_sd, self._dtype, self._device)
+        
         if self.img_name_type == "network":
             self.img_name_prefix = ",".join(network_list)
         

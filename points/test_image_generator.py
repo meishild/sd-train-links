@@ -124,7 +124,7 @@ class TrainProject:
       txt2img.set_dtype("fp16")
       txt2img.set_ckpt(os.path.join(project_path, "models" , "ghostmix_v12.safetensors"))
       txt2img.outdir = os.path.join(self.project_path, "images")
-
+      
       txt2img.xformers = True
       txt2img.max_embeddings_multiples = 3
       txt2img.textual_inversion_embeddings = [os.path.join(project_path, "models", "embeddings", "EasyNegative.safetensors")]
@@ -134,18 +134,18 @@ class TrainProject:
       txt2img.create_pipline()
       # ddim,pndm,lms,euler,euler_a,heun,dpm_2,dpm_2_a,dpmsolver,dpmsolver++,dpmsingle,k_lms,k_euler,k_euler_a,k_dpm_2,k_dpm_2_a,
 
-      txt2img.load_vae(os.path.join(project_path, "models", "vae", "animevae.pt"))
+      # txt2img.load_vae(os.path.join(project_path, "models", "vae", "animevae.pt"))
       params = Txt2ImgParams(
          sampler="dpmsolver++",
          prompt=prompt,
          negative_prompt=negative_prompt,
-         steps=30,
-         width=768,
-         height=1024,
-         scale=7.5,
+         steps=150,
+         width=512,
+         height=512,
+         scale=7,
          seed=280681258,
          clip_skip=2,
-         batch_size=4
+         batch_size=1
       )
       
       network = NetWorkData(
@@ -166,7 +166,7 @@ class TrainProject:
       txt2img.outdir = os.path.join(self.project_path, "images")
 
       txt2img.xformers = True
-      txt2img.max_embeddings_multiples = 3
+      txt2img.max_embeddings_multiples = 1
       txt2img.textual_inversion_embeddings = [os.path.join(project_path, "models", "embeddings", "EasyNegative.safetensors")]
 
       prompt = "1 girl, cute, solo, beautiful detailed sky, city ,detailed cafe, night, sitting, dating, (smile:1.1),(closed mouth) medium breasts,beautiful detailed eyes,(collared shirt:1.1),pleated skirt,(long hair:1.2),floating hair"
@@ -182,10 +182,10 @@ class TrainProject:
             sampler="dpmsolver++",
             prompt=prompt,
             negative_prompt=negative_prompt,
-            steps=30,
+            steps=150,
             width=512,
-            height=768,
-            scale=7.5,
+            height=512,
+            scale=7,
             seed=seed,
             clip_skip=2,
          )
@@ -210,4 +210,4 @@ if __name__ == '__main__':
    design_project = TrainProject("dribbble-design", 8)
    
    design_project.init_project()
-   design_project.test_checkpoints_n()
+   design_project.test_checkpoints_once()
