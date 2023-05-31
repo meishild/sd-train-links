@@ -330,14 +330,6 @@ def replace_unet_cross_attn_to_xformers():
 
     diffusers.models.attention.CrossAttention.forward = forward_xformers
 
-
-# endregion
-
-# region 画像生成の本体：lpw_stable_diffusion.py （ASL）からコピーして修正
-# https://github.com/huggingface/diffusers/blob/main/examples/community/lpw_stable_diffusion.py
-# Pipelineだけ独立して使えないのと機能追加するのとでコピーして修正
-
-
 class PipelineLike:
     r"""
     Pipeline for text-to-image generation using Stable Diffusion without tokens length limit, and support parsing
@@ -372,8 +364,6 @@ class PipelineLike:
         text_encoder: CLIPTextModel,
         tokenizer: CLIPTokenizer,
         unet: UNet2DConditionModel,
-        scheduler: Union[DDIMScheduler, PNDMScheduler, LMSDiscreteScheduler],
-        clip_skip: int,
         clip_model: CLIPModel,
         clip_guidance_scale: float,
         clip_image_guidance_scale: float,
@@ -385,40 +375,10 @@ class PipelineLike:
     ):
         super().__init__()
         self.device = device
-        self.clip_skip = clip_skip
-
-        if hasattr(scheduler.config, "steps_offset") and scheduler.config.steps_offset != 1:
-            deprecation_message = (
-                f"The configuration file of this scheduler: {scheduler} is outdated. `steps_offset`"
-                f" should be set to 1 instead of {scheduler.config.steps_offset}. Please make sure "
-                "to update the config accordingly as leaving `steps_offset` might led to incorrect results"
-                " in future versions. If you have downloaded this checkpoint from the Hugging Face Hub,"
-                " it would be very nice if you could open a Pull request for the `scheduler/scheduler_config.json`"
-                " file"
-            )
-            deprecate("steps_offset!=1", "1.0.0", deprecation_message, standard_warn=False)
-            new_config = dict(scheduler.config)
-            new_config["steps_offset"] = 1
-            scheduler._internal_dict = FrozenDict(new_config)
-
-        if hasattr(scheduler.config, "clip_sample") and scheduler.config.clip_sample is True:
-            deprecation_message = (
-                f"The configuration file of this scheduler: {scheduler} has not set the configuration `clip_sample`."
-                " `clip_sample` should be set to False in the configuration file. Please make sure to update the"
-                " config accordingly as not setting `clip_sample` in the config might lead to incorrect results in"
-                " future versions. If you have downloaded this checkpoint from the Hugging Face Hub, it would be very"
-                " nice if you could open a Pull request for the `scheduler/scheduler_config.json` file"
-            )
-            deprecate("clip_sample not set", "1.0.0", deprecation_message, standard_warn=False)
-            new_config = dict(scheduler.config)
-            new_config["clip_sample"] = False
-            scheduler._internal_dict = FrozenDict(new_config)
-
         self.vae = vae
         self.text_encoder = text_encoder
         self.tokenizer = tokenizer
         self.unet = unet
-        self.scheduler = scheduler
         self.safety_checker = None
 
         # Textual Inversion
@@ -445,6 +405,35 @@ class PipelineLike:
 
         # ControlNet
         self.control_nets: List[ControlNetInfo] = []
+
+    def set_scheduler(self, scheduler):
+        if hasattr(scheduler.config, "steps_offset") and scheduler.config.steps_offset != 1:
+            deprecation_message = (
+                f"The configuration file of this scheduler: {scheduler} is outdated. `steps_offset`"
+                f" should be set to 1 instead of {scheduler.config.steps_offset}. Please make sure "
+                "to update the config accordingly as leaving `steps_offset` might led to incorrect results"
+                " in future versions. If you have downloaded this checkpoint from the Hugging Face Hub,"
+                " it would be very nice if you could open a Pull request for the `scheduler/scheduler_config.json`"
+                " file"
+            )
+            deprecate("steps_offset!=1", "1.0.0", deprecation_message, standard_warn=False)
+            new_config = dict(scheduler.config)
+            new_config["steps_offset"] = 1
+            scheduler._internal_dict = FrozenDict(new_config)
+
+        if hasattr(scheduler.config, "clip_sample") and scheduler.config.clip_sample is True:
+            deprecation_message = (
+                f"The configuration file of this scheduler: {scheduler} has not set the configuration `clip_sample`."
+                " `clip_sample` should be set to False in the configuration file. Please make sure to update the"
+                " config accordingly as not setting `clip_sample` in the config might lead to incorrect results in"
+                " future versions. If you have downloaded this checkpoint from the Hugging Face Hub, it would be very"
+                " nice if you could open a Pull request for the `scheduler/scheduler_config.json` file"
+            )
+            deprecate("clip_sample not set", "1.0.0", deprecation_message, standard_warn=False)
+            new_config = dict(scheduler.config)
+            new_config["clip_sample"] = False
+            scheduler._internal_dict = FrozenDict(new_config)
+        self.scheduler = scheduler
 
     # Textual Inversion
     def add_token_replacement(self, target_token_id, rep_token_ids):
@@ -546,6 +535,7 @@ class PipelineLike:
         mask_image: Union[torch.FloatTensor, PIL.Image.Image, List[PIL.Image.Image]] = None,
         height: int = 512,
         width: int = 512,
+        clip_skip: int = 1,
         num_inference_steps: int = 50,
         guidance_scale: float = 7.5,
         negative_scale: float = None,
@@ -699,7 +689,7 @@ class PipelineLike:
                 prompt=prompt,
                 uncond_prompt=negative_prompt if do_classifier_free_guidance else None,
                 max_embeddings_multiples=max_embeddings_multiples,
-                clip_skip=self.clip_skip,
+                clip_skip=clip_skip,
                 **kwargs,
             )
 
@@ -709,7 +699,7 @@ class PipelineLike:
                 prompt=prompt,  # こちらのトークン長に合わせてuncondを作るので75トークン超で必須
                 uncond_prompt=[""] * batch_size,
                 max_embeddings_multiples=max_embeddings_multiples,
-                clip_skip=self.clip_skip,
+                clip_skip=clip_skip,
                 **kwargs,
             )
 
@@ -1971,79 +1961,3 @@ def preprocess_mask(mask):
     mask = 1 - mask  # repaint white, keep black
     mask = torch.from_numpy(mask)
     return mask
-
-
-# endregion
-
-
-# def load_clip_l14_336(dtype):
-#   print(f"loading CLIP: {CLIP_ID_L14_336}")
-#   text_encoder = CLIPTextModel.from_pretrained(CLIP_ID_L14_336, torch_dtype=dtype)
-#   return text_encoder
-
-
-class BatchDataBase(NamedTuple):
-    # バッチ分割が必要ないデータ
-    step: int
-    prompt: str
-    negative_prompt: str
-    seed: int
-    init_image: Any
-    mask_image: Any
-    clip_prompt: str
-    guide_image: Any
-
-
-class BatchDataExt(NamedTuple):
-    # バッチ分割が必要なデータ
-    width: int
-    height: int
-    steps: int
-    scale: float
-    negative_scale: float
-    strength: float
-    network_muls: Tuple[float]
-    num_sub_prompts: int
-
-
-class BatchData(NamedTuple):
-    return_latents: bool
-    base: BatchDataBase
-    ext: BatchDataExt
-
-
-
-# replace randn
-class NoiseManager:
-    def __init__(self):
-        self.sampler_noises = None
-        self.sampler_noise_index = 0
-
-    def reset_sampler_noises(self, noises):
-        self.sampler_noise_index = 0
-        self.sampler_noises = noises
-
-    def randn(self, shape, device=None, dtype=None, layout=None, generator=None):
-        # print("replacing", shape, len(self.sampler_noises), self.sampler_noise_index)
-        if self.sampler_noises is not None and self.sampler_noise_index < len(self.sampler_noises):
-            noise = self.sampler_noises[self.sampler_noise_index]
-            if shape != noise.shape:
-                noise = None
-        else:
-            noise = None
-        if noise == None:
-            print(f"unexpected noise request: {self.sampler_noise_index}, {shape}")
-            noise = torch.randn(shape, dtype=dtype, device=device, generator=generator)
-        self.sampler_noise_index += 1
-
-        return noise
-
-class TorchRandReplacer:
-    def __init__(self, noise_manager):
-        self.noise_manager = noise_manager
-    def __getattr__(self, item):
-        if item == "randn":
-            return self.noise_manager.randn
-        if hasattr(torch, item):
-            return getattr(torch, item)
-        raise AttributeError("'{}' object has no attribute '{}'".format(type(self).__name__, item))

@@ -6,7 +6,6 @@ sys.path.append(os.path.join(project_path, "points", "diffusion_generator"))
 sys.path.append(os.path.join(project_path, "points", "datasets"))
 
 from datetime import datetime
-from diffusion_generator import image_generator
 
 class TrainProject:
    def __init__(self, train_name, train_repeat) -> None:
@@ -94,8 +93,8 @@ class TrainProject:
          args_list.append(f"--network_mul=0.6")
          args_list.append(f"--sequential_file_name")
          args_list.append(f"--prompt=masterpiece, best quality, 1girl" + " --n " + "bad quality, worst quality, bad anatomy, bad hands")
-         name_space = image_generator.setup_parser().parse_args(args_list)
-         image_generator.main(name_space)
+         # name_space = image_generator.setup_parser().parse_args(args_list)
+         # image_generator.main(name_space)
    
    def test_cmd_checkpoints_once(self):
       import subprocess
@@ -119,7 +118,7 @@ class TrainProject:
       print(cmd)
 
    def test_checkpoints_once(self):
-      from diffusion_generator.image_generator_simple import GenImages, Txt2ImgParams, NetWorkData
+      from diffusion_generator.gen_img import GenImages, Txt2ImgParams, NetWorkData
 
       txt2img= GenImages()
       txt2img.set_dtype("fp16")
@@ -159,7 +158,7 @@ class TrainProject:
       txt2img.txt2img(params)
 
    def test_checkpoints_n(self):
-      from diffusion_generator.image_generator_simple import GenImages, Txt2ImgParams, NetWorkData
+      from diffusion_generator.gen_img import GenImages, Txt2ImgParams, NetWorkData
 
       txt2img= GenImages()
       txt2img.set_dtype("fp16")
@@ -211,4 +210,4 @@ if __name__ == '__main__':
    design_project = TrainProject("dribbble-design", 8)
    
    design_project.init_project()
-   design_project.test_checkpoints_once()
+   design_project.test_checkpoints_n()
