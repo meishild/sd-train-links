@@ -1,4 +1,4 @@
-from typing import Any, List, NamedTuple, Optional, Tuple, Union, Callable
+from typing import List, Optional, Union, Callable
 import inspect
 from diffusers.utils import deprecate
 from diffusers.configuration_utils import FrozenDict

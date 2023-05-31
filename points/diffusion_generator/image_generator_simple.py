@@ -2398,7 +2398,7 @@ class GenImages():
                 self._control_nets.append(ControlNetInfo(ctrl_unet, ctrl_net, prep, weight, ratio))
     
     def create_pipline(self):
-        # xformers、Hypernetwork 一致
+        # diffusers_xformers不支持Hypernetwork
         if not self.diffusers_xformers:
             replace_unet_modules(self._unet, not self.xformers, self.xformers)
 

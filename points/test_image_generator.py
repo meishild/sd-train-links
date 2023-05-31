@@ -97,12 +97,11 @@ class TrainProject:
          # image_generator.main(name_space)
    
    def test_cmd_checkpoints_once(self):
-      import subprocess
       args = []
       args.append('--prompt "1 girl, cute, solo, beautiful detailed sky, city ,detailed cafe, night, sitting, dating, (smile:1.1),(closed mouth) medium breasts,beautiful detailed eyes,(collared shirt:1.1),pleated skirt,(long hair:1.2),floating hair --n EasyNegative"')
-      args.append("--H 768")
+      args.append("--H 512")
       args.append("--W 512")
-      args.append("--steps 28")
+      args.append("--steps 150")
       args.append("--fp16")
       args.append("--ckpt %s" % os.path.join(project_path, "models" , "ghostmix_v12.safetensors"))
       args.append("--outdir %s" % os.path.join(self.project_path, "images"))
@@ -111,6 +110,9 @@ class TrainProject:
       args.append("--scale 8")
       args.append("--seed 280681258")
       args.append("--xformers")
+      args.append("--network_module networks.lora")
+      args.append("--network_weights %s" % os.path.join(project_path, "models", "lora", "JiaranDianaLoraASOUL_v20SingleCostume.safetensors"))
+      args.append("--network_mul 0.8")
       args.append("--max_embeddings_multiples 3")
       args.append("--textual_inversion_embeddings %s" % os.path.join(project_path, "models", "embeddings", "EasyNegative.safetensors"))
       python = r"python310\python.exe"
@@ -151,8 +153,9 @@ class TrainProject:
       network = NetWorkData(
             network_module="networks.lora",
             network_weight=os.path.join(project_path, "models", "lora", "JiaranDianaLoraASOUL_v20SingleCostume.safetensors"), 
-            network_mul=0.8
+            network_mul=0.8,
       )
+      network.network_merge = True
 
       params.networks=[network]
       txt2img.txt2img(params)
@@ -182,7 +185,7 @@ class TrainProject:
             sampler="dpmsolver++",
             prompt=prompt,
             negative_prompt=negative_prompt,
-            steps=150,
+            steps=30,
             width=512,
             height=512,
             scale=7,
@@ -199,6 +202,8 @@ class TrainProject:
             network_weight=os.path.join(project_path, "models", "lora", "JiaranDianaLoraASOUL_v20SingleCostume.safetensors"), 
             network_mul=0.8
          )
+         # network.network_merge=True
+         # network2.network_merge=True
          params.networks=[network, network2]
          txt2img.txt2img(params)
 

@@ -41,12 +41,9 @@ from pipline_diffusers import (
 
 
 from transformers import  CLIPTokenizer, CLIPModel
-import PIL
 from PIL import Image
 
 import library.model_util as model_util
-import tools.original_control_net as original_control_net
-from tools.original_control_net import ControlNetInfo
 
 
 class BatchDataBase(NamedTuple):
@@ -243,19 +240,11 @@ class GenImages():
         # max embeding multiples, max token length is 75 * multiples
         self.max_embeddings_multiples = 0
 
-        # ControlNet models to use 
-        self.control_net_models = None
-        # ControlNet preprocess to use
-        self.control_net_preps = None
-        # ControlNet weights 
-        self.control_net_weights = None
-        # ControlNet guidance ratio for steps
-        self.control_net_ratios = 0.0
-
         # batch size for VAE, < 1.0 for ratio
         self.vae_batch_size = 0
 
         self._networks = []
+        self._network_muls = []
         self._text_encoder = None
         
         self._unet = None
@@ -267,12 +256,6 @@ class GenImages():
         self._scheduler = None
         self._device = None
         self._pipe = None
-        self._control_nets: List[ControlNetInfo] = []
-        self._network_default_muls = []
-
-        self._init_images = None
-        self._mask_images = None
-        self._guide_images = None
 
         self.img_name_prefix = None # "network"
         self.img_name_type = "default"
@@ -442,17 +425,6 @@ class GenImages():
             print("set clip_sample to True")
             scheduler.config.clip_sample = True
         return scheduler
-
-    def _set_control_net(self):
-        if self.control_net_models:
-            for i, model in enumerate(self.control_net_models):
-                prep_type = None if not self.control_net_preps or len(self.control_net_preps) <= i else self.control_net_preps[i]
-                weight = 1.0 if not self.control_net_weights or len(self.control_net_weights) <= i else self.control_net_weights[i]
-                ratio = 1.0 if not self.control_net_ratios or len(self.control_net_ratios) <= i else self.control_net_ratios[i]
-
-                ctrl_unet, ctrl_net = original_control_net.load_control_net(self.v2, self._unet, model)
-                prep = original_control_net.load_preprocess(prep_type)
-                self._control_nets.append(ControlNetInfo(ctrl_unet, ctrl_net, prep, weight, ratio))
     
     def create_pipline(self):
         # xformers、Hypernetwork 一致
@@ -472,9 +444,6 @@ class GenImages():
         if self._clip_model is not None:
             self._clip_model.to(self._dtype).to(self._device)
         
-        # set ControlNet
-        self._set_control_net()
-        
         self._pipe = PipelineLike(
             self._device,
             self._vae,
@@ -488,7 +457,6 @@ class GenImages():
             0,
             None
         )
-        self._pipe.set_control_nets(self._control_nets)
         print("pipeline is ready.")
 
         if self.diffusers_xformers:
@@ -503,8 +471,6 @@ class GenImages():
         for n in networks:
             print("import network module:", n.network_module)
             imported_module = importlib.import_module(n.network_module)
-
-            self._network_default_muls.append(n.network_mul)
 
             net_kwargs = {}
             if n.network_args:
@@ -550,8 +516,10 @@ class GenImages():
 
                 if append_network:
                     self._networks.append(network)
+                    self._network_muls.append(n.network_mul)
                 else:
                     self._networks=[network]
+                    self._network_muls=[n.network_mul]
             else:
                 network.merge_to(self._text_encoder, self._unet, weights_sd, self._dtype, self._device)
         
@@ -568,70 +536,65 @@ class GenImages():
             for network in self._networks:
                 network.to(memory_format=torch.channels_last)
 
-            for cn in self._control_nets:
-                cn.unet.to(memory_format=torch.channels_last)
-                cn.net.to(memory_format=torch.channels_last)
-
     def _set_embeddings(self):
         if self.textual_inversion_embeddings:
-            token_ids_embeds = []
-            for embeds_file in self.textual_inversion_embeddings:
-                if model_util.is_safetensors(embeds_file):
-                    from safetensors.torch import load_file
-                    data = load_file(embeds_file)
-                else:
-                    data = torch.load(embeds_file, map_location="cpu")
+            return 
+        
+        token_ids_embeds = []
+        for embeds_file in self.textual_inversion_embeddings:
+            if model_util.is_safetensors(embeds_file):
+                from safetensors.torch import load_file
+                data = load_file(embeds_file)
+            else:
+                data = torch.load(embeds_file, map_location="cpu")
 
-                if "string_to_param" in data:
-                    data = data["string_to_param"]
-                embeds = next(iter(data.values()))
+            if "string_to_param" in data:
+                data = data["string_to_param"]
+            embeds = next(iter(data.values()))
 
-                if type(embeds) != torch.Tensor:
-                    raise ValueError(f"weight file does not contains Tensor / 重みファイルのデータがTensorではありません: {embeds_file}")
+            if type(embeds) != torch.Tensor:
+                raise ValueError(f"weight file does not contains Tensor: {embeds_file}")
 
-                num_vectors_per_token = embeds.size()[0]
-                token_string = os.path.splitext(os.path.basename(embeds_file))[0]
-                token_strings = [token_string] + [f"{token_string}{i+1}" for i in range(num_vectors_per_token - 1)]
+            num_vectors_per_token = embeds.size()[0]
+            token_string = os.path.splitext(os.path.basename(embeds_file))[0]
+            token_strings = [token_string] + [f"{token_string}{i+1}" for i in range(num_vectors_per_token - 1)]
 
-                # add new word to tokenizer, count is num_vectors_per_token
-                num_added_tokens = self._tokenizer.add_tokens(token_strings)
-                if num_added_tokens != num_vectors_per_token:
-                    return
-                # assert (
-                #     num_added_tokens == num_vectors_per_token
-                # ), f"tokenizer has same word to token string (filename). please rename the file / 指定した名前（ファイル名）のトークンが既に存在します。ファイルをリネームしてください: {embeds_file}"
+            # add new word to tokenizer, count is num_vectors_per_token
+            num_added_tokens = self._tokenizer.add_tokens(token_strings)
+            if num_added_tokens != num_vectors_per_token:
+                return
 
-                token_ids = self._tokenizer.convert_tokens_to_ids(token_strings)
-                print(f"Textual Inversion embeddings `{token_string}` loaded. Tokens are added: {token_ids}")
-                assert (
-                    min(token_ids) == token_ids[0] and token_ids[-1] == token_ids[0] + len(token_ids) - 1
-                ), f"token ids is not ordered"
-                assert len(self._tokenizer) - 1 == token_ids[-1], f"token ids is not end of tokenize: {len(self._tokenizer)}"
+            token_ids = self._tokenizer.convert_tokens_to_ids(token_strings)
+            print(f"Textual Inversion embeddings `{token_string}` loaded. Tokens are added: {token_ids}")
+            assert (
+                min(token_ids) == token_ids[0] and token_ids[-1] == token_ids[0] + len(token_ids) - 1
+            ), f"token ids is not ordered"
+            assert len(self._tokenizer) - 1 == token_ids[-1], f"token ids is not end of tokenize: {len(self._tokenizer)}"
 
-                if num_vectors_per_token > 1:
-                    self._pipe.add_token_replacement(token_ids[0], token_ids)
+            if num_vectors_per_token > 1:
+                self._pipe.add_token_replacement(token_ids[0], token_ids)
 
-                token_ids_embeds.append((token_ids, embeds))
+            token_ids_embeds.append((token_ids, embeds))
 
-            self._text_encoder.resize_token_embeddings(len(self._tokenizer))
-            token_embeds = self._text_encoder.get_input_embeddings().weight.data
-            for token_ids, embeds in token_ids_embeds:
-                for token_id, embed in zip(token_ids, embeds):
-                    token_embeds[token_id] = embed
+        self._text_encoder.resize_token_embeddings(len(self._tokenizer))
+        token_embeds = self._text_encoder.get_input_embeddings().weight.data
+        for token_ids, embeds in token_ids_embeds:
+            for token_id, embed in zip(token_ids, embeds):
+                token_embeds[token_id] = embed
 
     # def _set_pre_image(self, prompt_list):
     #     init_images = None
     #     if self.image_path is not None:
     #         print(f"load image for img2img: {self.image_path}")
     #         init_images = load_images(self.image_path)
-    #         assert len(init_images) > 0, f"No image / 画像がありません: {self.image_path}"
+    #         assert len(init_images) > 0, f"No image: {self.image_path}"
     #         print(f"loaded {len(init_images)} images for img2img")
 
     #     mask_images = None
     #     if self.mask_path is not None:
     #         print(f"load mask for inpainting: {self.mask_path}")
     #         mask_images = self.load_images(self.mask_path)
-    #         assert len(mask_images) > 0, f"No mask image / マスク画像がありません: {self.image_path}"
+    #         assert len(mask_images) > 0, f"No mask image: {self.image_path}"
     #         print(f"loaded {len(mask_images)} mask images for inpainting")
         
     #     # promptがないとき、画像のPngInfoから取得する
@@ -690,7 +653,7 @@ class GenImages():
 
     #         print(f"loaded {len(guide_images)} guide images for guidance")
     #         if len(guide_images) == 0:
-    #             print(f"No guide image, use previous generated image. / ガイド画像がありません。直前に生成した画像を使います: {self.image_path}")
+    #             print(f"No guide image, use previous generated image.: {self.image_path}")
     #             guide_images = None
 
     #     self._init_images = init_images
@@ -705,7 +668,7 @@ class GenImages():
         (
             return_latents,
             (_, _, _, _, clip_skip, init_image, mask_image, _, guide_image),
-            (width, height, steps, scale, negative_scale, strength, network_muls, num_sub_prompts),
+            (width, height, steps, scale, negative_scale, strength, _, num_sub_prompts),
         ) = batch[0]
         noise_shape = (LATENT_CHANNELS, height // DOWNSAMPLING_FACTOR, width // DOWNSAMPLING_FACTOR)
 
@@ -787,19 +750,12 @@ class GenImages():
         if guide_images is not None and all_guide_images_are_same:
             guide_images = guide_images[0]
 
-        # ControlNet
-        if self._control_nets:
-            guide_images = guide_images if type(guide_images) == list else [guide_images]
-            guide_images = [i.resize((width, height), resample=PIL.Image.LANCZOS) for i in guide_images]
-            if len(guide_images) == 1:
-                guide_images = guide_images[0]
-
         # generate
         if self._networks:
             shared = {}
-            for n, m in zip(self._networks, network_muls if network_muls else self._network_default_muls):
+            for n, m in zip(self._networks, self._network_muls):
                 n.set_multiplier(m)
-                if self._mask_images:
+                if mask_images:
                     n.set_current_generation(batch_size, num_sub_prompts, width, height, shared)
 
         images = self._pipe(
@@ -828,6 +784,8 @@ class GenImages():
         ts_str = time.strftime("%Y%m%d%H%M%S", time.localtime())
         for i, (image, seed) in enumerate(zip(images, seeds)):
             fln = f"im_{ts_str}_{i:03d}_{seed}.png"
+            if self.img_name_prefix:
+                fln = f"{self.img_name_prefix}_{fln}"
             image.save(os.path.join(self.outdir, fln))
 
         return images
