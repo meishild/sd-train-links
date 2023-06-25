@@ -537,7 +537,7 @@ class GenImages():
                 network.to(memory_format=torch.channels_last)
 
     def _set_embeddings(self):
-        if self.textual_inversion_embeddings:
+        if not self.textual_inversion_embeddings:
             return 
         
         token_ids_embeds = []
@@ -782,13 +782,16 @@ class GenImages():
 
         # save image
         ts_str = time.strftime("%Y%m%d%H%M%S", time.localtime())
+        images_path = []
         for i, (image, seed) in enumerate(zip(images, seeds)):
             fln = f"im_{ts_str}_{i:03d}_{seed}.png"
             if self.img_name_prefix:
                 fln = f"{self.img_name_prefix}_{fln}"
-            image.save(os.path.join(self.outdir, fln))
+            image_path = os.path.join(self.outdir, fln)
+            image.save(image_path)
+            images_path.append(image_path)
 
-        return images
+        return images_path
 
     def load_vae(self, vae):
          # 单独加载vae
@@ -844,10 +847,9 @@ class GenImages():
             batch_data.append(b1)
             global_step += 1
 
-        self._process_batch(batch_data)
+        images_path = self._process_batch(batch_data)
         batch_data.clear()
-
-        print("done!")
+        return images_path
     
     def gen_once_image(self):
         self.create_pipline()

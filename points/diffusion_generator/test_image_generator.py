@@ -2,8 +2,7 @@ import sys, os
 import random
 
 project_path = os.path.abspath(".")
-sys.path.append(os.path.join(project_path, "points", "diffusion_generator"))
-sys.path.append(os.path.join(project_path, "points", "datasets"))
+os.environ["TRANSFORMERS_CACHE"] = ".cache/huggingface/transformers"
 
 from datetime import datetime
 
@@ -120,7 +119,7 @@ class TrainProject:
       print(cmd)
 
    def test_checkpoints_once(self):
-      from diffusion_generator.gen_img import GenImages, Txt2ImgParams, NetWorkData
+      from gen_img import GenImages, Txt2ImgParams, NetWorkData
 
       txt2img= GenImages()
       txt2img.set_dtype("fp16")
@@ -150,18 +149,18 @@ class TrainProject:
          batch_size=1
       )
       
-      # network = NetWorkData(
-      #       network_module="networks.lora",
-      #       network_weight=os.path.join(project_path, "models", "lora", "JiaranDianaLoraASOUL_v20SingleCostume.safetensors"), 
-      #       network_mul=0.8,
-      # )
-      # network.network_merge = True
+      network = NetWorkData(
+            network_module="networks.lora",
+            network_weight=os.path.join(project_path, "models", "lora", "JiaranDianaLoraASOUL_v20SingleCostume.safetensors"), 
+            network_mul=0.8,
+      )
+      network.network_merge = True
 
-      # params.networks=[network]
+      params.networks=[network]
       txt2img.txt2img(params)
 
    def test_checkpoints_n(self):
-      from diffusion_generator.gen_img import GenImages, Txt2ImgParams, NetWorkData
+      from gen_img import GenImages, Txt2ImgParams, NetWorkData
 
       txt2img= GenImages()
       txt2img.set_dtype("fp16")
@@ -185,7 +184,7 @@ class TrainProject:
             sampler="dpmsolver++",
             prompt=prompt,
             negative_prompt=negative_prompt,
-            steps=30,
+            steps=50,
             width=512,
             height=512,
             scale=7,
@@ -209,10 +208,42 @@ class TrainProject:
 
 
 if __name__ == '__main__':
-   train_name = "dribbble-design"
-   train_repeat = 8
+   from gen_img import GenImages, Txt2ImgParams, NetWorkData
 
-   design_project = TrainProject("dribbble-design", 8)
+   txt2img = GenImages()
+   txt2img.set_dtype("fp16")
+   txt2img.set_ckpt(os.path.join(project_path, "models" , "ghostmix_v12.safetensors"))
+   txt2img.outdir = os.path.join(project_path, "images")
    
-   design_project.init_project()
-   design_project.test_checkpoints_once()
+   txt2img.xformers = True
+   txt2img.max_embeddings_multiples = 3
+   txt2img.textual_inversion_embeddings = [os.path.join(project_path, "models", "embeddings", "EasyNegative.safetensors")]
+   prompt = "1girl, navel, long hair, gloves, breasts, solo, crop top, suspenders, tank top, midriff, black hair, elbow gloves, looking at viewer, earrings, smile, skirt, outdoors, white tank top, fingerless gloves, jewelry, large breasts, black skirt, black gloves, suspender skirt, elbow pads, bare shoulders, taut shirt, taut clothes, parted lips, sky, day, belt, shirt, sports bra, dangle earrings, stomach, swept bangs, low-tied long hair, cleavage, lips"
+   negative_prompt = "EasyNegative"
+   txt2img.create_pipline()
+
+   # ddim,pndm,lms,euler,euler_a,heun,dpm_2,dpm_2_a,dpmsolver,dpmsolver++,dpmsingle,k_lms,k_euler,k_euler_a,k_dpm_2,k_dpm_2_a,
+   # txt2img.load_vae(os.path.join(project_path, "models", "vae", "animevae.pt"))
+   params = Txt2ImgParams(
+      sampler="dpmsolver++",
+      prompt=prompt,
+      negative_prompt=negative_prompt,
+      steps=50,
+      width=512,
+      height=512,
+      scale=7,
+      seed=585790273,
+      clip_skip=2,
+      batch_size=1
+   )
+   # seed = random.randint(0, 0x7FFFFFFF)
+
+   lora_path = "E:\\ai-stable-diffsuion\\Cybertronfurnace\\train\\model"
+   network = NetWorkData(
+         network_module="networks.lora",
+         network_weight=os.path.join(lora_path, "gufeng_20230618220730-000019.safetensors"), 
+         network_mul=0.8,
+   )
+   network.network_merge = True
+   params.networks = [network]
+   txt2img.txt2img(params)

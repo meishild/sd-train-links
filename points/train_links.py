@@ -10,7 +10,7 @@ sys.path.append(os.path.join(project_path, "points", "datasets"))
 from datetime import datetime
 from datasets.auto_tagging import tagger
 from sd_scripts import train_network
-from diffusion_generator import image_generator
+from diffusion_generator import gen_img
 from train_scripts.ArgsList import ArgStore
 from train_scripts.Parser import Parser
 from train_scripts import json_functions
@@ -85,7 +85,7 @@ class TrainProject:
       seed = random.randint(0, 0x7FFFFFFF)
       check_points = [name for name in os.listdir(self.checkpoints_path)if name.endswith('.safetensors')]
 
-      gen_image = image_generator.GenImages()
+      gen_image = gen_img.GenImages()
       gen_image.set_dtype("fp16")
       gen_image.set_ckpt(os.path.join(project_path, "models" , "NAI-full.ckpt"))
       gen_image.outdir = os.path.join(self.project_path, "images")
@@ -112,10 +112,10 @@ class TrainProject:
 
 
 if __name__ == '__main__':
-   train_name = "dribbble-design"
+   train_name = "gufeng"
    train_repeat = 8
 
-   design_project = TrainProject("dribbble-design", 8)
+   design_project = TrainProject("gufeng", 8)
    
    # 初始化项目
    design_project.init_project()
