@@ -1,3 +1,0 @@
-[submodule "points/sd_scripts"]
-	path = points/sd_scripts
-	url = https://github.com/kohya-ss/sd-scripts.git
