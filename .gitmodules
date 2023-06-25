@@ -4,3 +4,6 @@
 [submodule "diffusion_generator"]
 	path = points/diffusion_generator
 	url = https://github.com/meishild/diffusion-generator.git
+[submodule "points/diffusion_generator"]
+	path = points/diffusion_generator
+	url = git@github.com:meishild/diffusion-generator.git
